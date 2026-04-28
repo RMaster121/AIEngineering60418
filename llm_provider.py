@@ -3,7 +3,7 @@ from abc import abstractmethod, ABC
 from typing import TypeVar, Type, List
 
 from mistralai.client.models import ResponseFormat
-from openai.types import ResponseFormatJSONObject
+from openai.types import ResponseFormatJSONObject, ResponseFormatJSONSchema
 from pydantic import BaseModel
 from models import JudgeEvaluation
 
@@ -98,17 +98,24 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def generate_blueprint(self, prompt: str, schema: Type[T], temperature: float) -> T:
         schema_info = json.dumps(schema.model_json_schema(), indent=2)
-        full_prompt = f"{prompt}\n\nYou MUST return valid JSON exactly matching this schema:\n{schema_info}"
+        full_prompt = (
+            f"{prompt}\n\n"
+            f"--- CRITICAL INSTRUCTION ---\n"
+            f"You must output a JSON object POPULATED with real data according to the JSON Schema below.\n"
+            f"DO NOT return the schema definition itself (do not use keys like 'properties', 'type', etc. at the root level).\n"
+            f"Return ONLY a valid JSON instance that satisfies this schema:\n\n"
+            f"{schema_info}"
+        )
 
         messages: List[ChatCompletionMessageParam] = [
             ChatCompletionUserMessageParam(role="user", content=full_prompt)
         ]
 
         # noinspection PyTypeChecker
-        response = self.client.chat.completions.create(
+        response = self.client.chat.completions.parse(
             model=self.model_name,
             messages=messages,
-            response_format=ResponseFormatJSONObject(type="json_object"),
+            response_format=schema,
             temperature=temperature
         )
         return schema.model_validate_json(response.choices[0].message.content)
@@ -128,17 +135,22 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def evaluate_as_judge(self, prompt: str, schema: Type[JudgeEvaluation]) -> JudgeEvaluation:
         schema_info = json.dumps(schema.model_json_schema(), indent=2)
-        full_prompt = f"{prompt}\n\nReturn ONLY valid JSON matching this schema:\n{schema_info}"
-
+        full_prompt = (
+            f"{prompt}\n\n"
+            f"--- CRITICAL INSTRUCTION ---\n"
+            f"You must output a JSON object POPULATED with real data according to the JSON Schema below.\n"
+            f"DO NOT return the schema definition itself. Return ONLY a valid JSON instance:\n\n"
+            f"{schema_info}"
+        )
         messages: List[ChatCompletionMessageParam] = [
             ChatCompletionUserMessageParam(role="user", content=full_prompt)
         ]
 
         # noinspection PyTypeChecker
-        response = self.client.chat.completions.create(
+        response = self.client.chat.completions.parse(
             model=self.model_name,
             messages=messages,
-            response_format={"type": "json_object"},
+            response_format=schema,
             temperature=0.0
         )
         return schema.model_validate_json(response.choices[0].message.content)
