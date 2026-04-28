@@ -11,7 +11,6 @@ from models import AgentBlueprint, RulesBlueprint
 
 load_dotenv.load_dotenv()
 
-
 async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, test_provider: LLMProvider, max_iterations: int, target_success_rate: float = 1.0):
     history = []
     best_score = -1.0
@@ -28,7 +27,7 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
     log_filename = f"audit_log_{think_name}_{judge_name}_{worker_name}_{timestamp}.txt"
 
     print(f"Starting Evolution using:")
-    print(f" STEM_Agent:  {think_provider.model_name}")
+    print(f" STEM_Agent:    {think_provider.model_name}")
     print(f" Judge:         {judge_provider.model_name}")
     print(f" Worker (Test): {test_provider.model_name}")
 
@@ -57,6 +56,18 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
     print(f"Evaluation criteria: {rules_blueprint.evaluation_criteria}\n")
     print(f"Audit Logs will be saved to: {log_filename}\n")
 
+    with open(log_filename, "w", encoding="utf-8") as log_file:
+        log_file.write("=== STEM AGENT EVOLUTION AUDIT LOG ===\n")
+        log_file.write(f"Timestamp:    {timestamp}\n")
+        log_file.write(f"STEM Agent:   {think_provider.model_name}\n")
+        log_file.write(f"Judge Agent:  {judge_provider.model_name}\n")
+        log_file.write(f"Worker Agent: {test_provider.model_name}\n")
+        log_file.write("=" * 60 + "\n")
+        log_file.write(f"Task Description:\n{rules_blueprint.task_description}\n\n")
+        log_file.write(f"Evaluation Criteria:\n{rules_blueprint.evaluation_criteria}\n")
+        log_file.write("=" * 60 + "\n\n")
+
+
     for iteration in range(1, max_iterations + 1):
         stem_prompt = f"""
         You are an AI Architect (Stem Agent). Your goal is to write a flawless 'system_prompt' for a Target Agent.
@@ -69,7 +80,12 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
 
         HISTORY OF JUDGE'S FEEDBACK:
         {json.dumps(history, indent=2, ensure_ascii=False) if history else "No history. This is the baseline iteration."}
-
+        
+        CRITICAL INSTRUCTIONS FOR UPDATING THE TARGET AGENT'S PROMPT:
+        1. REQUIRE CHAIN-OF-THOUGHT (CoT): Small AI models must "think out loud". Explicitly instruct the Target Agent to write a "Reasoning:" section FIRST to analyze the text step-by-step. Only AFTER the reasoning, it should output the final JSON block.
+        2. ESTABLISH CORE PRINCIPLES: Do not use generic advice ("be careful"). Read the Judge's feedback and extract 2-3 clear, actionable rules. (e.g., "RULE: If a suspicious URL is present, threat_vector MUST be 'malicious_link'").
+        3. AVOID OVERLOADING: Do not give the Target Agent too many rules. Keep the system prompt concise, structured, and easy to follow for a smaller AI.        
+        
         Read the Judge's feedback carefully. If the Judge says the model failed, adjust your system_prompt to fix that exact issue. Generate the new Blueprint.
         """
 
@@ -108,6 +124,10 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
                 log_file.write(f"\n{'=' * 60}\n")
                 log_file.write(f"ITERATION {iteration}/{max_iterations} | SUCCESS RATE: {success_rate * 100}%\n")
                 log_file.write(f"{'=' * 60}\n")
+                log_file.write(f"STEM AGENT STRATEGY (Analysis):\n")
+                for obs in blueprint.iterations_analysis:
+                    log_file.write(f" - {obs}\n")
+                log_file.write("\n")
                 log_file.write(f"TARGET AGENT SYSTEM PROMPT:\n{blueprint.system_prompt}\n")
                 log_file.write(f"TEMPERATURE: {blueprint.temperature}")
                 log_file.write(f"\n--- EVALUATION DETAILS ---\n")
@@ -140,31 +160,34 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
 
     print(f"\nPeak Success Rate Achieved: {best_score * 100}%")
     if best_blueprint:
+        print(f"\n=== OPTIMAL TEMPERATURE = {best_blueprint.temperature} ===")
         print("\n=== OPTIMAL SYSTEM PROMPT ===")
         print(best_blueprint.system_prompt)
+
+        with open(log_filename, "a", encoding="utf-8") as log_file:
+            log_file.write(f"\nPeak Success Rate Achieved: {best_score * 100}%\n")
+            log_file.write(f"\n=== OPTIMAL TEMPERATURE = {best_blueprint.temperature} ===\n")
+            log_file.write("\n=== OPTIMAL SYSTEM PROMPT ===\n")
+            log_file.write(best_blueprint.system_prompt)
+
         return best_blueprint
     return None
 
 
 if __name__ == "__main__":
-    # thinking_provider = MistralProvider(api_key=os.getenv("MISTRAL_API_KEY"), model_name="mistral-large-latest")
-
     thinking_provider = OpenRouterProvider(api_key=os.getenv("OPENROUTER_API_KEY"),
-                                          model_name="meta-llama/llama-3.3-70b-instruct")
+                                          model_name="openai/gpt-4o-mini@preset/open-provider")
 
     judging_provider = OpenRouterProvider(api_key=os.getenv("OPENROUTER_API_KEY"),
                                               model_name="qwen/qwen-2.5-7b-instruct")
 
     testing_provider = OpenRouterProvider(api_key=os.getenv("OPENROUTER_API_KEY"),
-                                          model_name="meta-llama/llama-3.2-3b-instruct")
-
-    # testing_provider = LocalOllamaProvider(model_name="tinyllama")
-
+                                          model_name="qwen/qwen-2.5-7b-instruct")
 
 
     asyncio.run(evolution(
         think_provider=thinking_provider,
         judge_provider=judging_provider,
         test_provider=testing_provider,
-        max_iterations=20
+        max_iterations=5
     ))
