@@ -3,6 +3,8 @@
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/stablev1" />
+      <excludeFolder url="file://$MODULE_DIR$/stablev2" />
     </content>
     <orderEntry type="jdk" jdkName="uv (AIEngineering60418)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

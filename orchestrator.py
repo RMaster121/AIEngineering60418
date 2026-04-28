@@ -1,14 +1,13 @@
 import asyncio
 import datetime
-import json
 import os
 
 import load_dotenv
 
 import task_config
 from evaluator import evaluate_blueprint_async
-from llm_provider import LLMProvider, MistralProvider, LocalOllamaProvider, OpenRouterProvider
-from models import AgentBlueprint
+from llm_provider import *
+from models import AgentBlueprint, RulesBlueprint
 
 load_dotenv.load_dotenv()
 
@@ -32,8 +31,30 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
     print(f" STEM_Agent:  {think_provider.model_name}")
     print(f" Judge:         {judge_provider.model_name}")
     print(f" Worker (Test): {test_provider.model_name}")
-    print(f"Current Task: {task_config.TASK_DESCRIPTION}\n")
-    print(f"Evaluation criteria: {task_config.EVALUATION_CRITERIA}\n")
+
+    if len(task_config.DATASET) <= 0: raise Exception("No dataset provided")
+
+    sample_env = [{"input": sample["input_text"], "expected": sample["expected"]} for sample in task_config.DATASET[:max(round(len(task_config.DATASET) * 0.2), 1)]]
+    discovery_prompt = f"""
+        You are an AI Architect. You are placed in a new environment with no prior instructions.
+        Analyze these environmental samples (inputs and expected states):
+
+        {json.dumps(sample_env, indent=2)}
+
+        1. Deduce the main task that needs to be solved.
+        2. Write strict evaluation criteria for a Judge Agent to verify if future solutions are correct.
+        """
+
+    rules_blueprint: RulesBlueprint = await asyncio.to_thread(
+        think_provider.generate_blueprint,
+        prompt=discovery_prompt,
+        schema=RulesBlueprint,
+        temperature=0.4
+    )
+
+
+    print(f"Current Task: {rules_blueprint.task_description}\n")
+    print(f"Evaluation criteria: {rules_blueprint.evaluation_criteria}\n")
     print(f"Audit Logs will be saved to: {log_filename}\n")
 
     for iteration in range(1, max_iterations + 1):
@@ -41,10 +62,10 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
         You are an AI Architect (Stem Agent). Your goal is to write a flawless 'system_prompt' for a Target Agent.
 
         TASK DIRECTIVE FOR TARGET AGENT: 
-        {task_config.TASK_DESCRIPTION}
+        {rules_blueprint.task_description}
 
         EVALUATION CRITERIA (The Judge will use this to score the Target Agent):
-        {task_config.EVALUATION_CRITERIA}
+        {rules_blueprint.evaluation_criteria}
 
         HISTORY OF JUDGE'S FEEDBACK:
         {json.dumps(history, indent=2, ensure_ascii=False) if history else "No history. This is the baseline iteration."}
@@ -56,7 +77,7 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
             print(f"--- Iteration {iteration}/{max_iterations} ---")
             print("Stem Agent is creating new agent...")
 
-            blueprint = None
+            blueprint: AgentBlueprint | None = None
             max_stem_retries = 3
 
             for attempt in range(max_stem_retries):
@@ -76,10 +97,11 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
                     await asyncio.sleep(wait_time)
 
             print(f"Strategy: {blueprint.iterations_analysis}")
-            print(f"New system prompt: {blueprint.system_prompt}")
+            print(f"Prompt: {blueprint.system_prompt}")
+            print(f"Temperature: {blueprint.temperature}")
             print("Running evaluation...")
 
-            eval_results = await evaluate_blueprint_async(blueprint, task_config.DATASET, test_provider, judge_provider)
+            eval_results = await evaluate_blueprint_async(blueprint, rules_blueprint, task_config.DATASET, test_provider, judge_provider)
             success_rate = eval_results["success_rate"]
 
             with open(log_filename, "a", encoding="utf-8") as log_file:
@@ -125,10 +147,13 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
 
 
 if __name__ == "__main__":
-    thinking_provider = MistralProvider(api_key=os.getenv("MISTRAL_API_KEY"), model_name="mistral-large-latest")
+    # thinking_provider = MistralProvider(api_key=os.getenv("MISTRAL_API_KEY"), model_name="mistral-large-latest")
+
+    thinking_provider = OpenRouterProvider(api_key=os.getenv("OPENROUTER_API_KEY"),
+                                          model_name="meta-llama/llama-3.3-70b-instruct")
 
     judging_provider = OpenRouterProvider(api_key=os.getenv("OPENROUTER_API_KEY"),
-                                          model_name="qwen/qwen-2.5-7b-instruct")
+                                              model_name="qwen/qwen-2.5-7b-instruct")
 
     testing_provider = OpenRouterProvider(api_key=os.getenv("OPENROUTER_API_KEY"),
                                           model_name="meta-llama/llama-3.2-3b-instruct")

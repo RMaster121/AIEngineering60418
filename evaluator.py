@@ -2,8 +2,7 @@ import asyncio
 import sys
 import os
 from llm_provider import LLMProvider
-from models import JudgeEvaluation
-import task_config
+from models import JudgeEvaluation, AgentBlueprint, RulesBlueprint
 
 if os.name == 'nt':
     os.system('color')
@@ -34,8 +33,8 @@ class TerminalDashboard:
         self.lines_printed = len(self.states) + 1
 
 
-async def evaluate_single_item(blueprint, item, test_provider: LLMProvider, judge_provider: LLMProvider,
-                               dashboard: TerminalDashboard) -> dict:
+async def evaluate_single_item(blueprint: AgentBlueprint, rules: RulesBlueprint, item, test_provider: LLMProvider, judge_provider: LLMProvider,
+                               dashboard: TerminalDashboard) -> dict | None:
     max_retries = 3
     actual_output = None
     task_id = item['id']
@@ -64,17 +63,20 @@ async def evaluate_single_item(blueprint, item, test_provider: LLMProvider, judg
 
     await dashboard.update(task_id, "Judge: Analyzing output...")
     judge_prompt = f"""
-    You are an impartial AI Evaluator.
+        You are an impartial AI Evaluator.
 
-    TASK DESCRIPTION: {task_config.TASK_DESCRIPTION}
-    EVALUATION CRITERIA: {task_config.EVALUATION_CRITERIA}
+        TASK INFERRED BY STEM ARCHITECT:
+        {rules.task_description}
 
-    User Input: "{item['input_text']}"
-    Expected Output (Ground Truth): "{item['expected']}"
-    Actual Output (From Target Agent): "{actual_output}"
+        YOUR EVALUATION CRITERIA (Strictly follow these):
+        {rules.evaluation_criteria}
 
-    Evaluate if the Actual Output successfully fulfills the task compared to the Expected Output.
-    """
+        User Input: "{item['input_text']}"
+        Expected Output (Ground Truth): "{item['expected']}"
+        Actual Output (From Target Agent): "{actual_output}"
+
+        Evaluate if the Actual Output successfully fulfills the task compared to the Expected Output.
+        """
 
     for attempt in range(max_retries):
         try:
@@ -111,23 +113,21 @@ async def evaluate_single_item(blueprint, item, test_provider: LLMProvider, judg
             wait_time = 2 ** attempt
             await dashboard.update(task_id, f"Judge API error. Retrying in {wait_time}s...")
             await asyncio.sleep(wait_time)
-
     return None
 
 
-async def evaluate_blueprint_async(blueprint, dataset, test_provider: LLMProvider, judge_provider: LLMProvider) -> dict:
+async def evaluate_blueprint_async(blueprint: AgentBlueprint, rules: RulesBlueprint, dataset, test_provider: LLMProvider, judge_provider: LLMProvider) -> dict:
     print("\n")
 
     task_ids = [item['id'] for item in dataset]
     dashboard = TerminalDashboard(task_ids)
     dashboard.render()
 
-    tasks = [evaluate_single_item(blueprint, item, test_provider, judge_provider, dashboard) for item in dataset]
+    tasks = [evaluate_single_item(blueprint, rules, item, test_provider, judge_provider, dashboard) for item in dataset]
     results = await asyncio.gather(*tasks)
 
     success_count = sum(1 for r in results if r["success"])
     error_logs = [r["error"] for r in results if not r["success"]]
-
     task_details = [r["details"] for r in results if r and "details" in r]
 
     return {
