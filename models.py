@@ -1,4 +1,7 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
 
 class RulesBlueprint(BaseModel):
     """Used in the first layer: The Stem Agent deduces the problem and sets the rules"""
@@ -9,6 +12,7 @@ class RulesBlueprint(BaseModel):
         description="Write a strict, detailed prompt for the Judge Agent. Explain exactly how it should evaluate the Target Agent's output against the expected ground truth."
     )
 
+
 class AgentBlueprint(BaseModel):
     """Used in the second layer: The Stem Agent designs the worker to solve the task"""
     iterations_analysis: list[str] = Field(
@@ -17,11 +21,18 @@ class AgentBlueprint(BaseModel):
     temperature: float = Field(
         description="Suggested temperature for the Target Agent. Use lower values for precision, higher for creativity.",
         ge=0.01,
-        le=1.99
+        le=0.51
     )
     system_prompt: str = Field(
         description="The optimized system prompt for the Target Agent. It must give clear instructions to solve the specific task based on the Judge's feedback."
     )
+    architecture: Literal["single_shot", "cot", "self_reflection"] = Field(
+        description="Select the cognitive architecture for the Target Agent based on task complexity and Judge's feedback: "
+                    "'single_shot' (for trivial tasks or formatting fixes), "
+                    "'cot' (for tasks needing step-by-step logic), "
+                    "'self_reflection' (if the model correctly analyzes but fails to apply edge-case rules at the very end)."
+    )
+
 
 class JudgeEvaluation(BaseModel):
     is_correct: bool = Field(

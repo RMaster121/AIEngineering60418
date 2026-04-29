@@ -1,4 +1,6 @@
 import asyncio
+import json
+import re
 import sys
 import os
 from llm_provider import LLMProvider
@@ -24,7 +26,7 @@ class TerminalDashboard:
         if self.lines_printed > 0:
             sys.stdout.write(f"\r\033[{self.lines_printed}A")
 
-        output = "[Task Monitor]\n"
+        output = "[Task Monitor]\033[K\n"
         for tid, state in self.states.items():
             output += f"  Task {tid:02d}: {state}\033[K\n"
 
@@ -33,21 +35,44 @@ class TerminalDashboard:
         self.lines_printed = len(self.states) + 1
 
 
+def extract_clean_json(raw_text: str) -> dict[str, str]:
+    """Extracts clean result"""
+    match = re.search(r'```json\s*(.*?)\s*```', raw_text, re.DOTALL)
+    json_str = match.group(1) if match else raw_text
+    json_str = json_str.strip().strip("`")
+
+    try:
+        parsed_data = json.loads(json_str)
+        reasoning = parsed_data.get("reasoning") or parsed_data.get("critique") or parsed_data.get("draft") or "No thinking process captured."
+        result = parsed_data.get("result", parsed_data)
+
+        return {
+            "reasoning": reasoning,
+            "result_json_str": json.dumps(result)
+        }
+
+    except json.JSONDecodeError:
+        return {"reasoning": "Parse Error", "result_json_str": raw_text.strip()}
+
 async def evaluate_single_item(blueprint: AgentBlueprint, rules: RulesBlueprint, item, test_provider: LLMProvider, judge_provider: LLMProvider,
                                dashboard: TerminalDashboard) -> dict | None:
     max_retries = 3
     actual_output = None
+    actual_reasoning = "No reasoning captured."
     task_id = item['id']
 
     await dashboard.update(task_id, "Worker: Generating response...")
     for attempt in range(max_retries):
         try:
-            actual_output = await asyncio.to_thread(
+            actual_output_raw = await asyncio.to_thread(
                 test_provider.evaluate_task,
                 system_prompt=blueprint.system_prompt,
                 user_prompt=item["input_text"],
                 temperature=blueprint.temperature
             )
+            extracted = extract_clean_json(actual_output_raw)
+            actual_reasoning = extracted["reasoning"]
+            actual_output = extracted["result_json_str"]
             break
         except Exception as e:
             if attempt == max_retries - 1:
@@ -73,10 +98,12 @@ async def evaluate_single_item(blueprint: AgentBlueprint, rules: RulesBlueprint,
 
         User Input: "{item['input_text']}"
         Expected Output (Ground Truth): "{item['expected']}"
-        Actual Output (From Target Agent): "{actual_output}"
 
-        Evaluate if the Actual Output successfully fulfills the task compared to the Expected Output.
-        """
+        Target Agent's Reasoning: "{actual_reasoning}"
+        Target Agent's Final Output: "{actual_output}"
+
+        Evaluate if the Final Output successfully fulfills the task compared to the Expected Output.
+        CRITICAL: If the Output is incorrect, read the "Target Agent's Reasoning" to determine exactly WHERE its logic failed. Mention this logical flaw explicitly in your feedback.        """
 
     for attempt in range(max_retries):
         try:
@@ -91,7 +118,7 @@ async def evaluate_single_item(blueprint: AgentBlueprint, rules: RulesBlueprint,
                 return {
                     "success": True,
                     "error": None,
-                    "details": {"task_id": task_id, "actual": actual_output, "feedback": "Approved"}
+                    "details": {"task_id": task_id, "actual": actual_output, "feedback": "Approved", "thoughts": actual_reasoning}
                 }
             else:
                 await dashboard.update(task_id, "Failed: Rejected by Judge")
@@ -99,7 +126,7 @@ async def evaluate_single_item(blueprint: AgentBlueprint, rules: RulesBlueprint,
                 return {
                     "success": False,
                     "error": error_msg,
-                    "details": {"task_id": task_id, "actual": actual_output, "feedback": evaluation.feedback}
+                    "details": {"task_id": task_id, "actual": actual_output, "feedback": evaluation.feedback, "thoughts": actual_reasoning}
                 }
 
         except Exception as e:
