@@ -81,11 +81,6 @@ async def evolution(think_provider: LLMProvider, judge_provider: LLMProvider, te
         HISTORY OF JUDGE'S FEEDBACK:
         {json.dumps(history, indent=2, ensure_ascii=False) if history else "No history. This is the baseline iteration."}
         
-        CRITICAL INSTRUCTIONS FOR UPDATING THE TARGET AGENT'S PROMPT:
-        1. REQUIRE CHAIN-OF-THOUGHT (CoT): Small AI models must "think out loud". Explicitly instruct the Target Agent to write a "Reasoning:" section FIRST to analyze the text step-by-step. Only AFTER the reasoning, it should output the final JSON block.
-        2. ESTABLISH CORE PRINCIPLES: Do not use generic advice ("be careful"). Read the Judge's feedback and extract 2-3 clear, actionable rules. (e.g., "RULE: If a suspicious URL is present, threat_vector MUST be 'malicious_link'").
-        3. AVOID OVERLOADING: Do not give the Target Agent too many rules. Keep the system prompt concise, structured, and easy to follow for a smaller AI.        
-        
         Read the Judge's feedback carefully. If the Judge says the model failed, adjust your system_prompt to fix that exact issue. Generate the new Blueprint.
         """
 
