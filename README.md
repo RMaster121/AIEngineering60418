@@ -42,5 +42,8 @@ Over five iterations, the STEM agent successfully optimized the Worker's perform
 ```uv sync```
 3. Configure your environment:
 Rename .env.example to .env and change API keys inside
-4. Run the evolution
+4. Modify providers in ```orchestrator.py``` files according to needs (OpenRouterProvider, OpenAICompatibleProvider, LocalOllamaProvider, MistralProvider) with
+```api_key=os.getenv("{PROVIDER_NAME}_API_KEY")```
+```model_name="{model_name}"```
+5. Run the evolution
 ```python orchestrator.py```
